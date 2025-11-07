@@ -15,7 +15,7 @@ from kivy.uix.widget import Widget
 import kivy.utils  # Just in case we need color utils later
 
 # Quick setup for window size - makes it look like mobile on desktop
-Window.size = (400, 600)
+Window.size = (500, 600)
 
 # Some KV rules to standardize buttons and labels - keeps things consistent
 Builder.load_string('''
@@ -28,12 +28,6 @@ Builder.load_string('''
     height: '30dp'
     font_size: '12sp'
 ''')
-
-# Hardcoded password for now - in production, hash this or use secure storage
-DEFAULT_PASSWORD = 'supplybridge'
-
-# Flag to track if password protection is active
-PASSWORD_LOCK_ENABLED = False
 
 # Themes defined as dicts - easy to switch between light/dark
 LIGHT_THEME = {
@@ -87,94 +81,6 @@ class ThemedWidget(Widget):
     
     def apply_theme(self, is_dark):
         self.dark_mode = is_dark  # This triggers the property change
-
-# Login screen - shows welcome and password entry
-class LoginScreen(ThemedWidget, Screen):
-    def __init__(self, **kwargs):
-        super(LoginScreen, self).__init__(**kwargs)
-        self.error_label = None
-        # Main vertical layout with some padding
-        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
-        
-        # Title label
-        title = Label(text='Welcome to SupplyBridge', font_size='18sp', size_hint_y=None, height='50dp')
-        layout.add_widget(title)
-        
-        # Password field - hidden input
-        self.password_input = TextInput(hint_text='Enter Password', password=True, multiline=False)
-        layout.add_widget(self.password_input)
-        
-        # Error message spot
-        self.error_label = Label(text='', size_hint_y=None, height='30dp')
-        layout.add_widget(self.error_label)
-        
-        # Forgot button
-        forgot_btn = Button(text='Forgot Password?', size_hint_y=None, height='40dp')
-        forgot_btn.bind(on_press=self.go_to_forgot)
-        layout.add_widget(forgot_btn)
-        
-        # Enter button
-        enter_btn = Button(text='Enter', size_hint_y=None, height='50dp')
-        enter_btn.bind(on_press=self.login)
-        layout.add_widget(enter_btn)
-        
-        self.add_widget(layout)
-    
-    # Override to color errors properly
-    def on_dark_mode(self, instance, value):
-        super().on_dark_mode(instance, value)
-        theme = DARK_THEME if value else LIGHT_THEME
-        if self.error_label:
-            self.error_label.color = theme['error_color']
-    
-    # Handle login attempt
-    def login(self, instance):
-        global PASSWORD_LOCK_ENABLED
-        if PASSWORD_LOCK_ENABLED:
-            entered_pass = self.password_input.text
-            if entered_pass == DEFAULT_PASSWORD:
-                # Success - go to dash
-                self.manager.current = 'dashboard'
-                self.password_input.text = ''  # Clear it
-                if self.error_label:
-                    self.error_label.text = ''
-            else:
-                # Fail - show error
-                self.error_label.text = 'Invalid password. Try again.'
-        else:
-            # No lock, straight to dash
-            self.manager.current = 'dashboard'
-            self.password_input.text = ''
-    
-    # Nav to forgot screen
-    def go_to_forgot(self, instance):
-        self.manager.current = 'forgot_password'
-
-# Forgot password - placeholder for email reset
-class ForgotPasswordScreen(ThemedWidget, Screen):
-    def __init__(self, **kwargs):
-        super(ForgotPasswordScreen, self).__init__(**kwargs)
-        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
-        
-        title = Label(text='Forgot Password?', font_size='18sp', size_hint_y=None, height='50dp')
-        layout.add_widget(title)
-        
-        # Instructions with default hint
-        instr = Label(text='Check email for reset instructions\n(Default: supplybridge)', size_hint_y=None, height='60dp')
-        layout.add_widget(instr)
-        
-        email_input = TextInput(hint_text='Enter Email', multiline=False)
-        layout.add_widget(email_input)
-        
-        submit_btn = Button(text='Submit', size_hint_y=None, height='50dp')
-        layout.add_widget(submit_btn)
-        
-        # Back button
-        back_btn = Button(text='Back to Login', size_hint_y=None, height='40dp')
-        back_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'login'))
-        layout.add_widget(back_btn)
-        
-        self.add_widget(layout)
 
 # Dashboard - sidebar nav, empty content for now
 class DashboardScreen(ThemedWidget, Screen):
@@ -366,7 +272,7 @@ class DistributionScreen(ThemedWidget, Screen):
         
         self.add_widget(layout)
 
-# Settings - toggles for features
+# Settings - toggles for features (removed password toggle)
 class SettingsScreen(ThemedWidget, Screen):
     def __init__(self, **kwargs):
         super(SettingsScreen, self).__init__(**kwargs)
@@ -384,11 +290,6 @@ class SettingsScreen(ThemedWidget, Screen):
         self.dark_toggle.bind(on_press=self.toggle_dark_mode)
         layout.add_widget(self.dark_toggle)
         
-        # Password lock toggle
-        self.pass_toggle = ToggleButton(text='Password Lock: On/Off', size_hint_y=None, height='50dp', state='normal')
-        self.pass_toggle.bind(on_press=self.toggle_password)
-        layout.add_widget(self.pass_toggle)
-        
         clear_btn = Button(text='Clear Data', size_hint_y=None, height='50dp')
         layout.add_widget(clear_btn)
         
@@ -403,53 +304,6 @@ class SettingsScreen(ThemedWidget, Screen):
         is_dark = instance.state == 'down'
         for screen in self.manager.screens:
             screen.apply_theme(is_dark)
-    
-    def toggle_password(self, instance):
-        global PASSWORD_LOCK_ENABLED
-        if instance.state == 'down':
-            # Enable - go to setup
-            self.manager.current = 'password_setup'
-            PASSWORD_LOCK_ENABLED = True
-        else:
-            # Disable - no login required anymore
-            PASSWORD_LOCK_ENABLED = False
-
-# Setup new password
-class PasswordSetupScreen(ThemedWidget, Screen):
-    def __init__(self, **kwargs):
-        super(PasswordSetupScreen, self).__init__(**kwargs)
-        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
-        
-        title = Label(text='Set Password', font_size='18sp', size_hint_y=None, height='50dp')
-        layout.add_widget(title)
-        
-        self.pass1_input = TextInput(hint_text='Enter Password', password=True, multiline=False)
-        layout.add_widget(self.pass1_input)
-        
-        self.pass2_input = TextInput(hint_text='Re-enter Password', password=True, multiline=False)
-        layout.add_widget(self.pass2_input)
-        
-        submit_btn = Button(text='Submit', size_hint_y=None, height='50dp')
-        submit_btn.bind(on_press=self.setup_password)
-        layout.add_widget(submit_btn)
-        
-        back_btn = Button(text='Back', size_hint_y=None, height='40dp')
-        back_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'settings'))
-        layout.add_widget(back_btn)
-        
-        self.add_widget(layout)
-    
-    def setup_password(self, instance):
-        global DEFAULT_PASSWORD, PASSWORD_LOCK_ENABLED
-        pass1 = self.pass1_input.text
-        pass2 = self.pass2_input.text
-        if pass1 == pass2 and pass1:  # Match and not empty
-            DEFAULT_PASSWORD = pass1  # Set it (demo only)
-            PASSWORD_LOCK_ENABLED = True
-            self.manager.current = 'login'  # Back to login with new pass
-        else:
-            # TODO: Show mismatch error
-            pass
 
 # Confirm exit
 class ExitConfirmScreen(ThemedWidget, Screen):
@@ -480,9 +334,7 @@ class SupplyBridgeApp(App):
     def build(self):
         sm = ScreenManager()
         
-        # Add all screens
-        sm.add_widget(LoginScreen(name='login'))
-        sm.add_widget(ForgotPasswordScreen(name='forgot_password'))
+        # Add all screens (no login-related ones)
         sm.add_widget(DashboardScreen(name='dashboard'))
         sm.add_widget(CriticalAlertsScreen(name='alerts'))
         sm.add_widget(DonationsScreen(name='donations'))
@@ -491,7 +343,6 @@ class SupplyBridgeApp(App):
         sm.add_widget(RequestsScreen(name='requests'))
         sm.add_widget(DistributionScreen(name='distribution'))
         sm.add_widget(SettingsScreen(name='settings'))
-        sm.add_widget(PasswordSetupScreen(name='password_setup'))
         sm.add_widget(ExitConfirmScreen(name='exit_confirm'))
         
         # Set dark theme on all
@@ -501,12 +352,8 @@ class SupplyBridgeApp(App):
         # Dark bg
         Window.clearcolor = DARK_THEME['bg_color']
         
-        # Start screen based on lock
-        global PASSWORD_LOCK_ENABLED
-        if not PASSWORD_LOCK_ENABLED:
-            sm.current = 'dashboard'
-        else:
-            sm.current = 'login'
+        # Always start on dashboard
+        sm.current = 'dashboard'
         
         return sm
 

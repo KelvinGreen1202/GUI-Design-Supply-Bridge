@@ -13,9 +13,11 @@ from kivy.clock import Clock
 from kivy.properties import BooleanProperty
 from kivy.uix.widget import Widget
 import kivy.utils  # Just in case we need color utils later
+from backend import *
+
 
 # Quick setup for window size - makes it look like mobile on desktop
-Window.size = (500, 600)
+Window.size = (400, 600)
 
 # Some KV rules to standardize buttons and labels - keeps things consistent
 Builder.load_string('''
@@ -161,9 +163,13 @@ class DonationsScreen(ThemedWidget, Screen):
         title = Label(text='Donations', font_size='18sp', size_hint_y=None, height='50dp')
         layout.add_widget(title)
         
-        # Placeholder list
-        donations_placeholder = Label(text='No donations recorded.', halign='center', valign='middle', text_size=(None, None))
-        layout.add_widget(donations_placeholder)
+        # Scrollable area for donations
+        self.donations_layout = BoxLayout(orientation='vertical', size_hint_y=None)
+        self.donations_layout.bind(minimum_height=self.donations_layout.setter('height'))
+        
+        scroll = ScrollView()
+        scroll.add_widget(self.donations_layout)
+        layout.add_widget(scroll)
         
         add_btn = Button(text='Add Donation', size_hint_y=None, height='50dp')
         add_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'add_donation'))
@@ -174,6 +180,18 @@ class DonationsScreen(ThemedWidget, Screen):
         layout.add_widget(back_btn)
         
         self.add_widget(layout)
+        
+    def on_pre_enter(self, *args):
+        self.refresh_list()
+        
+    def refresh_list(self):
+        self.donations_layout.clear_widgets()
+        for d in get_donations():
+            self.donations_layout.add_widget(Label(
+                text=f"{d['donor_name']} - {d['item']} ({d['amount']})",
+                size_hint_y=None,
+                height='30dp'
+            ))
 
 # Form to add a donation
 class AddDonationScreen(ThemedWidget, Screen):
@@ -204,7 +222,21 @@ class AddDonationScreen(ThemedWidget, Screen):
         self.add_widget(layout)
     
     def submit_donation(self, instance):
-        # TODO: Save to some data store/inventory
+        name = self.name_input.text
+        item = self.item_input.text
+        amount = int(self.amount_input.text) if self.amount_input.text.isdigit() else 0
+
+        # Call the backend function
+        add_donation(name, item, amount)
+        
+        # Add to inventory
+        add_inventory(item, amount)
+
+        # Clear input fields so user can add another donation
+        self.name_input.text = ''
+        self.item_input.text = ''
+        self.amount_input.text = ''
+        
         self.manager.current = 'donations'
 
 # Inventory - list with add/reduce
@@ -216,9 +248,13 @@ class InventoryScreen(ThemedWidget, Screen):
         title = Label(text='Inventory', font_size='18sp', size_hint_y=None, height='50dp')
         layout.add_widget(title)
         
-        # Placeholder
-        inventory_placeholder = Label(text='No inventory items.', halign='center', valign='middle', text_size=(None, None))
-        layout.add_widget(inventory_placeholder)
+        # Scrollable inventory list
+        self.inventory_layout = BoxLayout(orientation='vertical', size_hint_y=None)
+        self.inventory_layout.bind(minimum_height=self.inventory_layout.setter('height'))
+        
+        scroll = ScrollView()
+        scroll.add_widget(self.inventory_layout)
+        layout.add_widget(scroll)
         
         # Buttons for stock changes
         btn_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height='50dp', spacing=10)
@@ -233,27 +269,117 @@ class InventoryScreen(ThemedWidget, Screen):
         layout.add_widget(back_btn)
         
         self.add_widget(layout)
+        
+    def on_pre_enter(self, *args):
+        self.refresh_inventory()
+        
+    def refresh_inventory(self):
+        self.inventory_layout.clear_widgets()
+        for item_data in get_inventory():
+            self.inventory_layout.add_widget(Label(
+                text=f"{item_data['item']}: {item_data['quantity']}",
+                size_hint_y=None,
+                height='30dp'
+            ))
 
-# Requests - placeholder for accept/decline
+# Requests - list with Add Request button and Accept/Decline per request
 class RequestsScreen(ThemedWidget, Screen):
     def __init__(self, **kwargs):
         super(RequestsScreen, self).__init__(**kwargs)
         layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
         
-        title = Label(text='Request', font_size='18sp', size_hint_y=None, height='50dp')
+        title = Label(text='Requests', font_size='18sp', size_hint_y=None, height='50dp')
         layout.add_widget(title)
         
-        # Placeholder
-        requests_placeholder = Label(text='No requests at this time.', halign='center', valign='middle', text_size=(None, None))
-        layout.add_widget(requests_placeholder)
+        # Scrollable requests list
+        self.requests_scroll = ScrollView()
+        self.requests_layout = BoxLayout(orientation='vertical', size_hint_y=None)
+        self.requests_layout.bind(minimum_height=self.requests_layout.setter('height'))
+        self.requests_scroll.add_widget(self.requests_layout)
+        layout.add_widget(self.requests_scroll)
+        
+        # Add Request button
+        add_request_btn = Button(text='Add Request', size_hint_y=None, height='50dp')
+        add_request_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'add_request'))
+        layout.add_widget(add_request_btn)
         
         back_btn = Button(text='Back to Dashboard', size_hint_y=None, height='40dp')
         back_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'dashboard'))
         layout.add_widget(back_btn)
         
         self.add_widget(layout)
+        
+    def on_pre_enter(self, *args):
+        self.refresh_requests()
+        
+    def refresh_requests(self):
+        self.requests_layout.clear_widgets()
+        for req in get_requests():
+            req_box = BoxLayout(orientation='vertical', size_hint_y=None, height='80dp')
+            req_label = Label(text=f"{req['school']}: {req['item']} ({req['quantity']})", size_hint_y=0.6)
+            btn_layout = BoxLayout(orientation='horizontal', size_hint_y=0.4)
+            accept_btn = Button(text='Accept')
+            accept_btn.bind(on_press=lambda x, r=req: self.accept_request(r))
+            decline_btn = Button(text='Decline')
+            decline_btn.bind(on_press=lambda x, r=req: self.decline_request(r))
+            btn_layout.add_widget(accept_btn)
+            btn_layout.add_widget(decline_btn)
+            req_box.add_widget(req_label)
+            req_box.add_widget(btn_layout)
+            self.requests_layout.add_widget(req_box)
+    
+    def accept_request(self, request):
+        update_request_status(request['id'], 'accepted')
+        # Nav to distribution
+        self.manager.current = 'distribution'
+    
+    def decline_request(self, request):
+        update_request_status(request['id'], 'declined')
 
-# Distribution records - placeholder
+# Form to add a request
+class AddRequestScreen(ThemedWidget, Screen):
+    def __init__(self, **kwargs):
+        super(AddRequestScreen, self).__init__(**kwargs)
+        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
+        
+        title = Label(text='Add Request', font_size='18sp', size_hint_y=None, height='50dp')
+        layout.add_widget(title)
+        
+        self.school_input = TextInput(hint_text='School/Program', multiline=False)
+        layout.add_widget(self.school_input)
+        
+        self.item_input = TextInput(hint_text='Item', multiline=False)
+        layout.add_widget(self.item_input)
+        
+        self.quantity_input = TextInput(hint_text='Quantity', multiline=False, input_filter='int')
+        layout.add_widget(self.quantity_input)
+        
+        submit_btn = Button(text='Submit', size_hint_y=None, height='50dp')
+        submit_btn.bind(on_press=self.submit_request)
+        layout.add_widget(submit_btn)
+        
+        cancel_btn = Button(text='Cancel', size_hint_y=None, height='50dp')
+        cancel_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'requests'))
+        layout.add_widget(cancel_btn)
+        
+        self.add_widget(layout)
+    
+    def submit_request(self, instance):
+        school = self.school_input.text
+        item = self.item_input.text
+        quantity = int(self.quantity_input.text) if self.quantity_input.text.isdigit() else 0
+        
+        # Call backend
+        add_request(school, item, quantity)
+        
+        # Clear fields
+        self.school_input.text = ''
+        self.item_input.text = ''
+        self.quantity_input.text = ''
+        
+        self.manager.current = 'requests'
+
+# Distribution - list with Distribute button
 class DistributionScreen(ThemedWidget, Screen):
     def __init__(self, **kwargs):
         super(DistributionScreen, self).__init__(**kwargs)
@@ -262,17 +388,83 @@ class DistributionScreen(ThemedWidget, Screen):
         title = Label(text='Distribution', font_size='18sp', size_hint_y=None, height='50dp')
         layout.add_widget(title)
         
-        # Placeholder
-        distribution_placeholder = Label(text='No distributions recorded.', halign='center', valign='middle', text_size=(None, None))
-        layout.add_widget(distribution_placeholder)
+        # Scrollable distributions list
+        self.distributions_scroll = ScrollView()
+        self.distributions_layout = BoxLayout(orientation='vertical', size_hint_y=None)
+        self.distributions_layout.bind(minimum_height=self.distributions_layout.setter('height'))
+        self.distributions_scroll.add_widget(self.distributions_layout)
+        layout.add_widget(self.distributions_scroll)
+        
+        # Distribute button
+        distribute_btn = Button(text='Distribute', size_hint_y=None, height='50dp')
+        distribute_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'add_distribution'))
+        layout.add_widget(distribute_btn)
         
         back_btn = Button(text='Back to Dashboard', size_hint_y=None, height='40dp')
         back_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'dashboard'))
         layout.add_widget(back_btn)
         
         self.add_widget(layout)
+        
+    def on_pre_enter(self, *args):
+        self.refresh_distributions()
+        
+    def refresh_distributions(self):
+        self.distributions_layout.clear_widgets()
+        for dist in get_distributions():
+            self.distributions_layout.add_widget(Label(
+                text=f"{dist['recipient']}: {dist['item']} ({dist['quantity']})",
+                size_hint_y=None,
+                height='30dp'
+            ))
 
-# Settings - toggles for features (removed password toggle)
+# Form to add a distribution (deducts from inventory)
+class AddDistributionScreen(ThemedWidget, Screen):
+    def __init__(self, **kwargs):
+        super(AddDistributionScreen, self).__init__(**kwargs)
+        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
+        
+        title = Label(text='Distribute Supplies', font_size='18sp', size_hint_y=None, height='50dp')
+        layout.add_widget(title)
+        
+        self.recipient_input = TextInput(hint_text='School/Foundation/Program', multiline=False)
+        layout.add_widget(self.recipient_input)
+        
+        self.item_input = TextInput(hint_text='Item', multiline=False)
+        layout.add_widget(self.item_input)
+        
+        self.quantity_input = TextInput(hint_text='Quantity', multiline=False, input_filter='int')
+        layout.add_widget(self.quantity_input)
+        
+        submit_btn = Button(text='Distribute', size_hint_y=None, height='50dp')
+        submit_btn.bind(on_press=self.submit_distribution)
+        layout.add_widget(submit_btn)
+        
+        cancel_btn = Button(text='Cancel', size_hint_y=None, height='50dp')
+        cancel_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'distribution'))
+        layout.add_widget(cancel_btn)
+        
+        self.add_widget(layout)
+    
+    def submit_distribution(self, instance):
+        recipient = self.recipient_input.text
+        item = self.item_input.text
+        quantity = int(self.quantity_input.text) if self.quantity_input.text.isdigit() else 0
+        
+        # Call backend to record distribution
+        add_distribution(recipient, item, quantity)
+        
+        # Deduct from inventory
+        deduct_inventory(item, quantity)
+        
+        # Clear fields
+        self.recipient_input.text = ''
+        self.item_input.text = ''
+        self.quantity_input.text = ''
+        
+        self.manager.current = 'distribution'
+
+# Settings - toggles for features (no password toggle)
 class SettingsScreen(ThemedWidget, Screen):
     def __init__(self, **kwargs):
         super(SettingsScreen, self).__init__(**kwargs)
@@ -334,14 +526,16 @@ class SupplyBridgeApp(App):
     def build(self):
         sm = ScreenManager()
         
-        # Add all screens (no login-related ones)
+        # Add screens (no login-related ones)
         sm.add_widget(DashboardScreen(name='dashboard'))
         sm.add_widget(CriticalAlertsScreen(name='alerts'))
         sm.add_widget(DonationsScreen(name='donations'))
         sm.add_widget(AddDonationScreen(name='add_donation'))
         sm.add_widget(InventoryScreen(name='inventory'))
         sm.add_widget(RequestsScreen(name='requests'))
+        sm.add_widget(AddRequestScreen(name='add_request'))
         sm.add_widget(DistributionScreen(name='distribution'))
+        sm.add_widget(AddDistributionScreen(name='add_distribution'))
         sm.add_widget(SettingsScreen(name='settings'))
         sm.add_widget(ExitConfirmScreen(name='exit_confirm'))
         

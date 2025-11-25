@@ -465,6 +465,8 @@ class RequestsScreen(ThemedWidget, Screen):
     def show_popup(self, message):
         popup = Popup(title='Request Update', content=Label(text=message), size_hint=(0.8, 0.4))
         popup.open()
+        # Auto-dismiss after 3 seconds
+        Clock.schedule_once(lambda dt: popup.dismiss(), 3)
 
 # Form to add a request
 class AddRequestScreen(ThemedWidget, Screen):

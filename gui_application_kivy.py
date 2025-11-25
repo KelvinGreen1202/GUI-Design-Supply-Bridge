@@ -7,6 +7,7 @@ from kivy.uix.textinput import TextInput
 from kivy.uix.togglebutton import ToggleButton
 from kivy.uix.gridlayout import GridLayout
 from kivy.uix.scrollview import ScrollView
+from kivy.uix.popup import Popup
 from kivy.lang import Builder
 from kivy.core.window import Window
 from kivy.clock import Clock
@@ -14,7 +15,6 @@ from kivy.properties import BooleanProperty
 from kivy.uix.widget import Widget
 import kivy.utils  # Just in case we need color utils later
 from backend import *
-
 
 # Quick setup for window size - makes it look like mobile on desktop
 Window.size = (400, 600)
@@ -84,7 +84,7 @@ class ThemedWidget(Widget):
     def apply_theme(self, is_dark):
         self.dark_mode = is_dark  # This triggers the property change
 
-# Dashboard - sidebar nav, empty content for now
+# Dashboard - sidebar nav, with dynamic content for totals, low stock, recent requests
 class DashboardScreen(ThemedWidget, Screen):
     def __init__(self, **kwargs):
         super(DashboardScreen, self).__init__(**kwargs)
@@ -126,16 +126,43 @@ class DashboardScreen(ThemedWidget, Screen):
         
         main_layout.add_widget(sidebar)
         
-        # Placeholder content
-        content = Label(text='Dashboard', halign='center', valign='middle', text_size=(None, None))
-        main_layout.add_widget(content)
+        # Dynamic content layout
+        self.content_layout = BoxLayout(orientation='vertical', spacing=10, padding=10)
+        self.total_label = Label(text='Total Items: 0', size_hint_y=None, height='30dp')
+        self.low_label = Label(text='Low Stock: 0', size_hint_y=None, height='30dp')
+        recent_scroll = ScrollView(size_hint_y=None, height='150dp')
+        self.recent_label = Label(text='Recent Requests:\nNone', halign='left', valign='top', text_size=(None, None), size_hint_y=None, height='150dp')
+        recent_scroll.add_widget(self.recent_label)
+        self.content_layout.add_widget(self.total_label)
+        self.content_layout.add_widget(self.low_label)
+        self.content_layout.add_widget(recent_scroll)
+        
+        main_layout.add_widget(self.content_layout)
         
         self.add_widget(main_layout)
+    
+    def on_pre_enter(self, *args):
+        self.refresh_content()
+    
+    def refresh_content(self):
+        inv = get_inventory()
+        total = sum(i['quantity'] for i in inv)
+        self.total_label.text = f'Total Items: {total}'
+        
+        low_count = len([i for i in inv if i['quantity'] < 3])
+        self.low_label.text = f'Low Stock: {low_count}'
+        
+        reqs = get_requests()[-3:]
+        if reqs:
+            text = 'Recent Requests:\n' + '\n'.join([f"- {r['school']}: {r['item']} x{r['quantity']} ({r['status']})" for r in reqs])
+        else:
+            text = 'Recent Requests:\nNone'
+        self.recent_label.text = text
     
     def go_to_exit(self, instance):
         self.manager.current = 'exit_confirm'
 
-# Critical alerts - shows placeholders for totals
+# Critical alerts - shows low stock details dynamically
 class CriticalAlertsScreen(ThemedWidget, Screen):
     def __init__(self, **kwargs):
         super(CriticalAlertsScreen, self).__init__(**kwargs)
@@ -144,15 +171,23 @@ class CriticalAlertsScreen(ThemedWidget, Screen):
         title = Label(text='Critical Alerts', font_size='18sp', size_hint_y=None, height='50dp')
         layout.add_widget(title)
         
-        # Placeholder - in real, pull from data
-        alerts_placeholder = Label(text='No alerts at this time.', halign='center', valign='middle', text_size=(None, None))
-        layout.add_widget(alerts_placeholder)
+        # Dynamic alerts
+        self.alerts_placeholder = Label(text='No alerts at this time.', halign='center', valign='middle', text_size=(None, None))
+        layout.add_widget(self.alerts_placeholder)
         
         back_btn = Button(text='Back to Dashboard', size_hint_y=None, height='40dp')
         back_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'dashboard'))
         layout.add_widget(back_btn)
         
         self.add_widget(layout)
+    
+    def on_pre_enter(self, *args):
+        low_items = [f"- {i['item']}: {i['quantity']}" for i in get_inventory() if i['quantity'] < 3]
+        if low_items:
+            text = 'Low Stock Alerts:\n' + '\n'.join(low_items)
+        else:
+            text = 'No alerts at this time.'
+        self.alerts_placeholder.text = text
 
 # Donations list - with add button
 class DonationsScreen(ThemedWidget, Screen):
@@ -259,7 +294,9 @@ class InventoryScreen(ThemedWidget, Screen):
         # Buttons for stock changes
         btn_layout = BoxLayout(orientation='horizontal', size_hint_y=None, height='50dp', spacing=10)
         add_btn = Button(text='Add Stock')
+        add_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'add_stock'))
         reduce_btn = Button(text='Reduce Stock')
+        reduce_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'reduce_stock'))
         btn_layout.add_widget(add_btn)
         btn_layout.add_widget(reduce_btn)
         layout.add_widget(btn_layout)
@@ -269,20 +306,86 @@ class InventoryScreen(ThemedWidget, Screen):
         layout.add_widget(back_btn)
         
         self.add_widget(layout)
-        
+    
     def on_pre_enter(self, *args):
         self.refresh_inventory()
-        
+    
     def refresh_inventory(self):
         self.inventory_layout.clear_widgets()
-        for item_data in get_inventory():
+        for i in get_inventory():
             self.inventory_layout.add_widget(Label(
-                text=f"{item_data['item']}: {item_data['quantity']}",
+                text=f"{i['item']}: {i['quantity']}",
                 size_hint_y=None,
                 height='30dp'
             ))
 
-# Requests - list with Add Request button and Accept/Decline per request
+# Add stock form
+class AddStockScreen(ThemedWidget, Screen):
+    def __init__(self, **kwargs):
+        super(AddStockScreen, self).__init__(**kwargs)
+        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
+        
+        title = Label(text='Add Stock', font_size='18sp', size_hint_y=None, height='50dp')
+        layout.add_widget(title)
+        
+        self.item_input = TextInput(hint_text='Item', multiline=False)
+        layout.add_widget(self.item_input)
+        
+        self.quantity_input = TextInput(hint_text='Quantity', multiline=False, input_filter='int')
+        layout.add_widget(self.quantity_input)
+        
+        submit_btn = Button(text='Submit', size_hint_y=None, height='50dp')
+        submit_btn.bind(on_press=self.submit_add)
+        layout.add_widget(submit_btn)
+        
+        cancel_btn = Button(text='Cancel', size_hint_y=None, height='50dp')
+        cancel_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'inventory'))
+        layout.add_widget(cancel_btn)
+        
+        self.add_widget(layout)
+    
+    def submit_add(self, instance):
+        item = self.item_input.text
+        quantity = int(self.quantity_input.text) if self.quantity_input.text.isdigit() else 0
+        add_inventory(item, quantity)
+        self.item_input.text = ''
+        self.quantity_input.text = ''
+        self.manager.current = 'inventory'
+
+# Reduce stock form
+class ReduceStockScreen(ThemedWidget, Screen):
+    def __init__(self, **kwargs):
+        super(ReduceStockScreen, self).__init__(**kwargs)
+        layout = BoxLayout(orientation='vertical', padding=20, spacing=10)
+        
+        title = Label(text='Reduce Stock', font_size='18sp', size_hint_y=None, height='50dp')
+        layout.add_widget(title)
+        
+        self.item_input = TextInput(hint_text='Item', multiline=False)
+        layout.add_widget(self.item_input)
+        
+        self.quantity_input = TextInput(hint_text='Quantity', multiline=False, input_filter='int')
+        layout.add_widget(self.quantity_input)
+        
+        submit_btn = Button(text='Submit', size_hint_y=None, height='50dp')
+        submit_btn.bind(on_press=self.submit_reduce)
+        layout.add_widget(submit_btn)
+        
+        cancel_btn = Button(text='Cancel', size_hint_y=None, height='50dp')
+        cancel_btn.bind(on_press=lambda x: setattr(self.manager, 'current', 'inventory'))
+        layout.add_widget(cancel_btn)
+        
+        self.add_widget(layout)
+    
+    def submit_reduce(self, instance):
+        item = self.item_input.text
+        quantity = int(self.quantity_input.text) if self.quantity_input.text.isdigit() else 0
+        deduct_inventory(item, quantity)
+        self.item_input.text = ''
+        self.quantity_input.text = ''
+        self.manager.current = 'inventory'
+
+# Requests screen - enhanced with status display and conditional buttons
 class RequestsScreen(ThemedWidget, Screen):
     def __init__(self, **kwargs):
         super(RequestsScreen, self).__init__(**kwargs)
@@ -291,7 +394,7 @@ class RequestsScreen(ThemedWidget, Screen):
         title = Label(text='Requests', font_size='18sp', size_hint_y=None, height='50dp')
         layout.add_widget(title)
         
-        # Scrollable requests list
+        # Scrollable requests
         self.requests_scroll = ScrollView()
         self.requests_layout = BoxLayout(orientation='vertical', size_hint_y=None)
         self.requests_layout.bind(minimum_height=self.requests_layout.setter('height'))
@@ -315,26 +418,53 @@ class RequestsScreen(ThemedWidget, Screen):
     def refresh_requests(self):
         self.requests_layout.clear_widgets()
         for req in get_requests():
-            req_box = BoxLayout(orientation='vertical', size_hint_y=None, height='80dp')
-            req_label = Label(text=f"{req['school']}: {req['item']} ({req['quantity']})", size_hint_y=0.6)
-            btn_layout = BoxLayout(orientation='horizontal', size_hint_y=0.4)
-            accept_btn = Button(text='Accept')
-            accept_btn.bind(on_press=lambda x, r=req: self.accept_request(r))
-            decline_btn = Button(text='Decline')
-            decline_btn.bind(on_press=lambda x, r=req: self.decline_request(r))
-            btn_layout.add_widget(accept_btn)
-            btn_layout.add_widget(decline_btn)
+            req_box = BoxLayout(orientation='vertical', size_hint_y=None, height='80dp' if req['status'] == 'pending' else '40dp')
+            req_label = Label(
+                text=f"{req['school']}: {req['item']} ({req['quantity']}) - Status: {req['status']}", 
+                size_hint_y=0.6
+            )
             req_box.add_widget(req_label)
-            req_box.add_widget(btn_layout)
+            
+            if req['status'] == 'pending':
+                btn_layout = BoxLayout(orientation='horizontal', size_hint_y=0.4)
+                accept_btn = Button(text='Accept', background_color=(0,1,0,1))  # Green
+                accept_btn.bind(on_press=lambda x, r=req: self.accept_request(r))
+                decline_btn = Button(text='Decline', background_color=(1,0,0,1))  # Red
+                decline_btn.bind(on_press=lambda x, r=req: self.decline_request(r))
+                btn_layout.add_widget(accept_btn)
+                btn_layout.add_widget(decline_btn)
+                req_box.add_widget(btn_layout)
+                req_box.height = '80dp'
+            
             self.requests_layout.add_widget(req_box)
     
     def accept_request(self, request):
-        update_request_status(request['id'], 'accepted')
-        # Nav to distribution
-        self.manager.current = 'distribution'
+        # Check if sufficient inventory
+        inv = get_inventory()
+        sufficient = False
+        for i in inv:
+            if i['item'] == request['item'] and i['quantity'] >= request['quantity']:
+                sufficient = True
+                break
+        
+        if sufficient:
+            update_request_status(request['id'], 'accepted')
+            add_distribution(request['school'], request['item'], request['quantity'])
+            deduct_inventory(request['item'], request['quantity'])
+            self.show_popup('Request accepted and distributed successfully!')
+        else:
+            self.show_popup('Insufficient inventory to fulfill this request.')
+        
+        self.refresh_requests()
     
     def decline_request(self, request):
         update_request_status(request['id'], 'declined')
+        self.show_popup('Request declined.')
+        self.refresh_requests()
+    
+    def show_popup(self, message):
+        popup = Popup(title='Request Update', content=Label(text=message), size_hint=(0.8, 0.4))
+        popup.open()
 
 # Form to add a request
 class AddRequestScreen(ThemedWidget, Screen):
@@ -483,6 +613,7 @@ class SettingsScreen(ThemedWidget, Screen):
         layout.add_widget(self.dark_toggle)
         
         clear_btn = Button(text='Clear Data', size_hint_y=None, height='50dp')
+        clear_btn.bind(on_press=self.clear_all_data)
         layout.add_widget(clear_btn)
         
         back_btn = Button(text='Back to Dashboard', size_hint_y=None, height='40dp')
@@ -496,6 +627,13 @@ class SettingsScreen(ThemedWidget, Screen):
         is_dark = instance.state == 'down'
         for screen in self.manager.screens:
             screen.apply_theme(is_dark)
+    
+    def clear_all_data(self, instance):
+        global inventory, donations, requests, distributions
+        inventory.clear()
+        donations.clear()
+        requests.clear()
+        distributions.clear()
 
 # Confirm exit
 class ExitConfirmScreen(ThemedWidget, Screen):
@@ -532,6 +670,8 @@ class SupplyBridgeApp(App):
         sm.add_widget(DonationsScreen(name='donations'))
         sm.add_widget(AddDonationScreen(name='add_donation'))
         sm.add_widget(InventoryScreen(name='inventory'))
+        sm.add_widget(AddStockScreen(name='add_stock'))
+        sm.add_widget(ReduceStockScreen(name='reduce_stock'))
         sm.add_widget(RequestsScreen(name='requests'))
         sm.add_widget(AddRequestScreen(name='add_request'))
         sm.add_widget(DistributionScreen(name='distribution'))
